@@ -1,0 +1,159 @@
+{% macro accessLevel type %}{% if type.accessLevel == "public" or type.accessLevel == "open" %}public {% endif %}{% endmacro %}
+
+{% macro className type %}{% if type.name|hasSuffix:"Protocol" %}{{ type.name|replace:"Protocol","" }}{% elif type.name|hasSuffix:"Builds" %}{{ type.name|replace:"Builds","Builder" }}{% else %}{{ type.name }}{% endif %}{% endmacro %}
+
+{% macro subclassName type %}{% if type.based["DynamicFieldsBusinessLogic"] %}DynamicFieldsBusinessLogicMock, {% elif type.based["DynamicFieldsDisplay"] %}DynamicFieldsDisplayMock, {% elif type.based["DynamicFieldsPresentationLogic"] %}DynamicFieldsPresentationLogicMock, {% elif type.based["NSObjectProtocol"] %}NSObject, {% elif type.based["UITableViewDataSource"] %}UITableViewDataSourceMock, {% elif type.based["UITableViewDelegate"] %}UITableViewDelegateMock, {% elif type.based["UIView & ContentStateView"] %}ContentStateViewMock, {% elif type.based["DisplaysDefaultContentState"] %}UIViewMock, DisplaysContentStateTrait,  {% endif %}{% endmacro %}
+
+{% macro methodName name %}{{ name | replace:"(","_" | replace:")","" | replace:":","_" | replace:"`","" | replace:"_dto_","_DTO_" | replace:"_uri_","_URI_" | replace:"_url_","_URL_" | replace:"_uid_","_UID_" | replace:"_id_","_ID_" | snakeToCamelCase | lowerFirstWord }}{% endmacro %}
+
+{% macro throwableMethodName method type %}
+    {% call accessLevel type %}var {% call methodName method.selectorName %}ThrowableError: Error?
+{% endmacro %}
+
+{% macro methodThrowableErrorUsage method %}
+        if let error = {% call methodName method.selectorName %}ThrowableError { throw error }
+{% endmacro %}
+
+{% macro resetForStatic type%}{% for method in type.allMethods where method.isStatic %}
+{% if forloop.first %}
+    // MARK: - reset
+
+    {% call accessLevel type %}class func reset() {
+{% endif %}
+        {% call methodName method.selectorName %}WasCalled = 0
+{% if method.parameters.count == 1 %}
+        {% call methodName method.selectorName %}Received{% for parameter in method.parameters %}{% call argumentName parameter.name %} = nil {% endfor %}
+{% elif not method.parameters.count == 0 %}
+        {% call methodName method.selectorName %}ReceivedArguments = nil
+{% endif %}
+{% if forloop.last %}
+    }
+{% endif %}
+{% endfor %}
+{% endmacro %}
+
+{% macro argumentName name %}{% if name == "api" %}{{ name | uppercase }}{% elif name == "bic" %}{% elif name == "bik" %}{{ name | uppercase }}{% elif name == "cvv" %}{{ name | uppercase }}{% elif name == "dto" %}{{ name | uppercase }}{% elif name == "kfp" %}{{ name | uppercase }}{% elif name == "pdf" %}{{ name | uppercase }}{% elif name == "pif" %}{{ name | uppercase }}{% elif name == "pifs" %}{{ PIFs }}{% elif name == "sdk" %}{{ name | uppercase }}{% elif name == "sms" %}{{ name | uppercase }}{% elif name == "ssl" %}{{ name | uppercase }}{% elif name == "uri" %}{{ name | uppercase }}{% elif name == "url" %}{{ name | uppercase }}{% elif name == "uid" %}{{ name | uppercase }}{% elif name == "id" %}{{ name | uppercase }}{% elif name == "vip" %}{{ name | uppercase }}{% else %}{{ name | upperFirstLetter }}{% endif %}{% endmacro %}
+
+{% macro methodReceivedParameters method %}
+    {%if method.parameters.count == 1 %}
+        {% call methodName method.selectorName %}Received{% for parameter in method.parameters %}{% call argumentName parameter.name %} = {{ parameter.name }}{% endfor %}
+    {% else %}
+    {% if not method.parameters.count == 0 %}
+        {% call methodName method.selectorName %}ReceivedArguments = ({% for parameter in method.parameters %}{{ parameter.name }}: {{ parameter.name }}{% if not forloop.last%}, {% endif %}{% endfor %})
+    {% endif %}
+    {% endif %}
+{% endmacro %}
+
+{% macro methodClosureName method %}{% call methodName method.selectorName %}Closure{% endmacro %}
+
+{% macro closureReturnTypeName method %}{% if method.isOptionalReturnType %}{{ method.unwrappedReturnTypeName }}?{% else %}{{ method.returnTypeName }}{% endif %}{% endmacro %}
+
+{% macro methodClosureCallParameters method %}{% for parameter in method.parameters %}{{ parameter.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endmacro %}
+
+{% macro mockMethod method type %}
+    // MARK: - {{ method.shortName }}
+
+    {% if not method.isInitializer %}
+    {% call accessLevel type %}private(set) var {% call methodName method.selectorName %}WasCalled: Int = 0
+    {% endif %}
+    {% if method.parameters.count == 1 %}
+    {% call accessLevel type %}private(set) var {% call methodName method.selectorName %}Received{% for parameter in method.parameters %}{% call argumentName parameter.name %}: {{ '(' if parameter.isClosure }}{{ parameter.typeName.unwrappedTypeName }}{{ ')' if parameter.isClosure }}?{% endfor %}
+    {% elif not method.parameters.count == 0 %}
+    {% call accessLevel type %}private(set) var {% call methodName method.selectorName %}ReceivedArguments: ({% for parameter in method.parameters %}{{ parameter.name }}: {{ parameter.unwrappedTypeName if parameter.typeAttributes.escaping else parameter.typeName }}{{ ', ' if not forloop.last }}{% endfor %})?
+    {% endif %}
+    {% if method.throws %}{% call throwableMethodName method type %}{% endif %}
+    {% if not method.returnTypeName.isVoid and not method.isInitializer %}
+    {% call accessLevel type %}var {% call methodName method.selectorName %}Stub: {% if method.returnTypeName.name == "Self" %}{% call className type %}Mock!{% else %}{{ method.returnTypeName }}{{ '!' if not method.isOptionalReturnType }}{% endif %}
+    {% endif %}
+
+{% if method.isInitializer %}
+    {% call accessLevel type %}required {{ method.name }} {
+        {% call methodReceivedParameters method %}
+        {% call methodClosureName method %}?({% call methodClosureCallParameters method %})
+    }
+{% else %}
+    {% call accessLevel type %}func {{ method.name }}{{ ' throws' if method.throws }}{% if not method.returnTypeName.isVoid %} -> {{ method.returnTypeName }}{% endif %} {
+        {% if method.throws %}
+        {% call methodThrowableErrorUsage method %}
+        {% endif %}
+        {% call methodName method.selectorName %}WasCalled += 1
+        {% call methodReceivedParameters method %}
+        {% if method.returnTypeName.isVoid %}
+        {% else %}
+        return {% call methodName method.selectorName %}Stub{% if method.returnTypeName.name == "Self" %} as! Self{% endif %}
+        {% endif %}
+    }
+
+{% endif %}
+{% endmacro %}
+
+{% macro mockStaticRoutesMethod method %}
+    // MARK: - {{ method.shortName }}
+
+    {% call accessLevel type %}static var {% call methodName method.selectorName %}WasCalled: Int = 0
+    {% if method.parameters.count == 1 %}
+    {% call accessLevel type %}static var {% call methodName method.selectorName %}Received{% for parameter in method.parameters %}{% call argumentName parameter.name %}: {{ '(' if parameter.isClosure }}{{ parameter.typeName.unwrappedTypeName }}{{ ')' if parameter.isClosure }}?{% endfor %}
+    {% elif not method.parameters.count == 0 %}
+    {% call accessLevel type %}static var {% call methodName method.selectorName %}ReceivedArguments: ({% for parameter in method.parameters %}{{ parameter.name }}: {{ parameter.unwrappedTypeName if parameter.typeAttributes.escaping else parameter.typeName }}{{ ', ' if not forloop.last }}{% endfor %})?
+    {% endif %}
+
+    {% call accessLevel type %}static func {{ method.name }} -> {{ method.returnTypeName }} {
+        {% call methodReceivedParameters method %}
+        return {{ method.returnTypeName }} { _ in {% call methodName method.selectorName %}WasCalled += 1 }
+    }
+
+{% endmacro %}
+
+{% macro mockArrayOrDictionaryVariable variable %}
+    // MARK: - {{ variable.name }}
+
+    {% call accessLevel type %}var {% call mockedVariableName variable %}: {{ variable.typeName }}{% if variable.isOptional %}?{% endif %}{% if variable.isArray %} = []{% elif variable.isDictionary %} = [:]{% endif %}
+{% endmacro %}
+
+{% macro stubedVariableName variable %}{{ variable.name }}Stub{% endmacro %}
+{% macro mockedVariableName variable %}{{ variable.name }}{% endmacro %}
+
+{% macro mockVariable variable %}
+    // MARK: - {{ variable.name }}
+
+    {% call accessLevel type %}{% if variable.isStatic %}static {% else %}private(set) {% endif %}var get{% call argumentName variable.name %}WasCalled: Int = 0
+    {% call accessLevel type %}{% if variable.isStatic %}static {% else %}private(set) {% endif %}var set{% call argumentName variable.name %}WasCalled: Int = 0
+    {% call accessLevel type %}{{ 'static ' if variable.isStatic }}var {% call stubedVariableName variable %}: {{ variable.typeName }}{% if not variable.isOptional %}!{% endif %}
+
+    {% call accessLevel type %}{{ 'static ' if variable.isStatic }}var {% call mockedVariableName variable %}: {{ variable.typeName }} {
+        get {
+            get{% call argumentName variable.name %}WasCalled += 1
+            return {% call stubedVariableName variable %}
+        }
+        set {
+            set{% call argumentName variable.name %}WasCalled += 1
+            {% call stubedVariableName variable %} = newValue
+        }
+    }
+
+{% endmacro %}
+
+{% for type in types.protocols %}
+
+{% call accessLevel type %}final class {% call className type %}Mock: {% call subclassName type %}{{ type.name }} {
+{% if not type.based["NSObjectProtocol"] and type.accessLevel == "public" or type.accessLevel == "open" %}
+    // MARK: - Lifecycle
+
+    public init() { }
+
+{% endif %}
+{% for variable in type.allVariables|!definedInExtension %}
+    {% if variable.isArray or variable.isDictionary %}{% call mockArrayOrDictionaryVariable variable %}{% else %}{% call mockVariable variable %}{% endif %}
+{% endfor %}
+
+{% for method in type.allMethods|!definedInExtension %}
+{% if method.isStatic %}
+    {% call mockStaticRoutesMethod method %}
+{% else %}
+    {% call mockMethod method type %}
+{% endif %}
+{% endfor %}
+{%call resetForStatic type%}
+
+}
+{% endfor %}
